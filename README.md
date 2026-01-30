@@ -2,8 +2,7 @@
 
 > 「為什麼要為了看歌詞每個月付錢給串流平台？程式碼能解決的問題，就不該用錢解決。」
 
-![Vutron Lite Screenshot](https://via.placeholder.com/800x400?text=Put+Your+Screenshot+Here)
-*(建議你自己截一張圖放這裡，證明它真的能跑)*
+
 
 ## 這是什麼？
 
