@@ -52,10 +52,10 @@
 執行以下指令：
 python main.py
 
-如果看到 Uvicorn running on http://127.0.0.1:8000，恭喜，它活了。
+如果看到 Uvicorn running on "http://127.0.0.1:8000" ，恭喜，它活了。
 
 4. 開始聽歌
-打開瀏覽器，前往 http://127.0.0.1:8000。點擊左側的歌單，享受免費的動態歌詞。
+打開瀏覽器，前往 "http://127.0.0.1:8000" 。點擊左側的歌單，享受免費的動態歌詞。
 
 技術堆疊 (給想改 Code 的人看)
 Backend: FastAPI (比 Flask 快，比 Django 瘦)
