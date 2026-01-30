@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vutron Player</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* 保底樣式：萬一 Tailwind 沒載入，至少背景要是黑的 */
+        body { background-color: #111; color: #eee; font-family: sans-serif; overflow: hidden; }
+        
+        /* 歌詞列表的捲軸隱藏 */
+        #lyrics-wrapper::-webkit-scrollbar { display: none; }
+        
+        /* 動態歌詞的核心樣式 */
+        .lyric-line {
+            transition: all 0.3s ease;
+            opacity: 0.4;
+            transform: scale(0.95);
+            margin: 20px 0;
+            cursor: pointer;
+            filter: blur(1px); /* 未唱到的模糊 */
+        }
+        
+        /* 唱到的那一句：變亮、變大、清晰 */
+        .lyric-line.active {
+            opacity: 1;
+            transform: scale(1.1);
+            color: #fff;
+            font-weight: bold;
+            text-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+            filter: blur(0);
+        }
+
+        /* 如果沒有歌詞時的顯示 */
+        .no-lyrics { color: #666; font-size: 1.5rem; margin-top: 100px; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white h-screen flex">
+
+    <div class="w-1/4 h-full bg-black/40 border-r border-white/10 flex flex-col">
+        <div class="p-4 border-b border-white/10 font-bold text-xl text-pink-500">
+            我的歌單
+        </div>
+        <div id="song-list" class="flex-1 overflow-y-auto p-2 space-y-1">
+            <div class="text-gray-500 p-2 text-sm">正在讀取...</div>
+        </div>
+    </div>
+
+    <div class="flex-1 flex flex-col relative">
+        <div class="absolute inset-0 bg-gradient-to-br from-indigo-900/50 to-black pointer-events-none"></div>
+
+        <div id="lyrics-wrapper" class="flex-1 overflow-y-auto relative z-10 flex flex-col items-center py-40 scroll-smooth">
+            <div id="lyrics-container" class="text-center w-full max-w-2xl px-4">
+                <p class="no-lyrics">請點擊左側歌曲開始播放</p>
+            </div>
+        </div>
+
+        <div class="h-24 bg-black/60 backdrop-blur-md border-t border-white/10 flex items-center px-6 z-20 gap-4">
+            <div class="w-1/4">
+                <div id="current-title" class="font-bold truncate">---</div>
+                <div id="current-artist" class="text-xs text-gray-400 truncate">---</div>
+            </div>
+            
+            <audio id="audio" class="flex-1 h-10 rounded-full" controls></audio>
+            
+            <div class="w-1/4"></div>
+        </div>
+    </div>
+
+    <script>
+        const songListEl = document.getElementById('song-list');
+        const lyricsContainer = document.getElementById('lyrics-container');
+        const lyricsWrapper = document.getElementById('lyrics-wrapper'); // 用來捲動的容器
+        const audio = document.getElementById('audio');
+        
+        let lyricsData = []; // 存解析後的歌詞：[{time: 12.5, text: "歌詞", id: "line-0"}]
+
+        // 1. 載入歌單
+        async function loadSongs() {
+            try {
+                const res = await fetch('/api/songs');
+                const songs = await res.json();
+                
+                songListEl.innerHTML = '';
+                if (songs.length === 0) {
+                    songListEl.innerHTML = '<div class="p-4 text-red-400">找不到 .mp3 檔案</div>';
+                    return;
+                }
+
+                songs.forEach(song => {
+                    const div = document.createElement('div');
+                    div.className = "p-3 hover:bg-white/10 rounded cursor-pointer transition-colors group";
+                    div.innerHTML = `
+                        <div class="text-sm font-medium text-gray-200 group-hover:text-white">${song.title}</div>
+                        <div class="text-xs text-gray-500">${song.artist}</div>
+                    `;
+                    div.onclick = () => playSong(song);
+                    songListEl.appendChild(div);
+                });
+            } catch (err) {
+                console.error(err);
+                songListEl.innerHTML = '<div class="p-4 text-red-500">連線錯誤，請確認 python 有在跑</div>';
+            }
+        }
+
+        // 2. 播放邏輯
+        async function playSong(song) {
+            // 更新 UI
+            document.getElementById('current-title').innerText = song.title;
+            document.getElementById('current-artist').innerText = song.artist;
+            lyricsContainer.innerHTML = '<p class="no-lyrics animate-pulse">正在搜尋歌詞...</p>';
+            
+            // 播放
+            audio.src = song.url;
+            audio.play();
+
+            // 抓歌詞
+            try {
+                const res = await fetch(`/api/lyrics?title=${encodeURIComponent(song.title)}&artist=${encodeURIComponent(song.artist)}`);
+                const data = await res.json();
+                
+                if (data.lyrics && data.lyrics.trim() !== "") {
+                    // 檢查是不是 LRC 格式 (有沒有時間標籤)
+                    if (data.lyrics.indexOf('[') !== -1) {
+                        parseLyrics(data.lyrics);
+                    } else {
+                        // 純文字歌詞，無法同步
+                        lyricsData = [];
+                        lyricsContainer.innerHTML = `<p class="whitespace-pre-wrap text-lg text-gray-400 leading-loose">${data.lyrics}</p>`;
+                    }
+                } else {
+                    lyricsContainer.innerHTML = '<p class="no-lyrics">找不到歌詞 🥲</p>';
+                    lyricsData = [];
+                }
+            } catch (e) {
+                lyricsContainer.innerHTML = '<p class="no-lyrics">歌詞載入失敗</p>';
+            }
+        }
+
+        // 3. 解析 [00:00.00] 格式
+        function parseLyrics(lrcText) {
+            lyricsContainer.innerHTML = '';
+            lyricsData = [];
+            
+            const lines = lrcText.split('\n');
+            const timeRegex = /\[(\d{2}):(\d{2}\.\d{2,3})\](.*)/;
+
+            lines.forEach((line, index) => {
+                const match = timeRegex.exec(line);
+                if (match) {
+                    const minutes = parseInt(match[1]);
+                    const seconds = parseFloat(match[2]);
+                    const time = minutes * 60 + seconds;
+                    const text = match[3].trim();
+                    
+                    if (text) { // 忽略空行
+                        const p = document.createElement('p');
+                        p.id = `line-${index}`;
+                        p.className = "lyric-line text-xl md:text-3xl";
+                        p.innerText = text;
+                        // 點歌詞可以跳轉時間
+                        p.onclick = () => { audio.currentTime = time; };
+                        
+                        lyricsContainer.appendChild(p);
+                        lyricsData.push({ time, element: p });
+                    }
+                }
+            });
+        }
+
+        // 4. 同步捲動邏輯 (最重要的地方)
+        audio.addEventListener('timeupdate', () => {
+            if (!lyricsData.length) return;
+
+            const currentTime = audio.currentTime;
+            
+            // 找出目前應該亮起哪一句
+            // 邏輯：找「最後一句」其時間小於等於當前時間
+            let activeIndex = -1;
+            for (let i = 0; i < lyricsData.length; i++) {
+                if (currentTime >= lyricsData[i].time) {
+                    activeIndex = i;
+                } else {
+                    break; 
+                }
+            }
+
+            if (activeIndex !== -1) {
+                // 清除舊的 active
+                const currentActive = document.querySelector('.lyric-line.active');
+                if (currentActive) currentActive.classList.remove('active');
+
+                // 設定新的 active
+                const activeLine = lyricsData[activeIndex].element;
+                activeLine.classList.add('active');
+
+                // 捲動至畫面中間
+                activeLine.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
+        });
+
+        // 啟動
+        loadSongs();
+    </script>
+</body>
+</html>
